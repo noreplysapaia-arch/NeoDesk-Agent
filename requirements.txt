@@ -1,5 +1,0 @@
-flask
-flask-cors
-google-genai
-edge-tts
-gunicorn
