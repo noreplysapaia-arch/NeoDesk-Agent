@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neodesk — কল সিমুলেশন</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="stage">
+    <main class="call-card" role="main">
+      <header class="call-header">
+        <div class="avatar" aria-hidden="true">র</div>
+        <div class="header-text">
+          <h1>রিমি</h1>
+          <p><span class="status-dot"></span>Neodesk কল সেন্টার</p>
+        </div>
+        <div class="call-timer" id="callTimer">০০:০০</div>
+      </header>
+
+      <section class="chat-log" id="chatLog" aria-live="polite"></section>
+
+      <form class="composer" id="composerForm">
+        <input
+          type="text"
+          id="messageInput"
+          placeholder="আপনার উত্তর লিখুন..."
+          autocomplete="off"
+          aria-label="বার্তা লিখুন"
+        />
+        <button type="submit" id="sendBtn" aria-label="পাঠান">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M3.4 20.6 21 12 3.4 3.4 3 10l12 2-12 2z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+      </form>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
