@@ -10,8 +10,12 @@ Local run:
 Deploy: see ../README.md
 """
 
+import asyncio
+import base64
+import io
 import os
 
+import edge_tts
 import google.generativeai as genai
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -57,6 +61,17 @@ SYSTEM_PROMPT = f"""
 - অর্ডার কনফার্মেশন, ডেলিভারি ঠিকানা/সময় ভেরিফাই করা এবং সাধারণ প্রশ্নের উত্তর দেওয়াই মূল কাজ।
 """
 
+GREETING = (
+    f"আসসালামু আলাইকুম! আমি {COMPANY_NAME} থেকে {AGENT_NAME} বলছি। "
+    f"আমি কি {CUSTOMER_DATA['name']} সাহেবের সাথে কথা বলছি?"
+)
+
+# Bangla + English voices for edge-tts, selectable from the frontend
+TTS_VOICES = {
+    "bn": "bn-BD-NabanitaNeural",
+    "en": "en-US-AriaNeural",
+}
+
 app = Flask(__name__)
 CORS(app)  # allow requests from the Netlify frontend
 
@@ -94,6 +109,39 @@ def chat():
         return jsonify({"error": f"Gemini API কল ব্যর্থ হয়েছে: {exc}"}), 500
 
     return jsonify({"reply": reply_text})
+
+
+async def _synthesize(text: str, voice: str) -> bytes:
+    communicate = edge_tts.Communicate(text, voice)
+    buf = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            buf.write(chunk["data"])
+    return buf.getvalue()
+
+
+@app.route("/api/tts", methods=["POST"])
+def tts():
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    lang = data.get("lang") or "bn"
+    voice = TTS_VOICES.get(lang, TTS_VOICES["bn"])
+
+    if not text:
+        return jsonify({"error": "text খালি থাকতে পারবে না।"}), 400
+
+    try:
+        audio_bytes = asyncio.run(_synthesize(text, voice))
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"TTS ব্যর্থ হয়েছে: {exc}"}), 500
+
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    return jsonify({"audio_base64": audio_b64, "mime": "audio/mpeg"})
+
+
+@app.route("/api/greeting", methods=["GET"])
+def greeting():
+    return jsonify({"text": GREETING})
 
 
 @app.route("/api/health", methods=["GET"])
