@@ -1,93 +1,254 @@
 // ---------------------------------------------------------------------------
-// CONFIG: point this at your deployed backend (Render/Railway/etc.)
-// Example: "https://neodesk-backend.onrender.com"
+// CONFIG
 // ---------------------------------------------------------------------------
-const BACKEND_URL = "https://neodesk-agent.onrender.com";[span_1](start_span)[span_1](end_span)
+const BACKEND_URL = "http://localhost:5000";
+const FALLBACK_GREETING =
+  "আসসালামু আলাইকুম! আমি Neodesk থেকে রিমি বলছি। আমি কি তানভীর আহমেদ সাহেবের সাথে কথা বলছি?";
 
-const GREETING = "আসসালামু আলাইকুম! আমি Neodesk থেকে রিমি বলছি। আমি কি তানভীর আহমেদ সাহেবের সাথে কথা বলছি?";[span_2](start_span)[span_2](end_span)
+const RECOGNITION_LANG = { bn: "bn-BD", en: "en-US" };
 
-const chatLog = document.getElementById("chatLog");[span_3](start_span)[span_3](end_span)
-const composerForm = document.getElementById("composerForm");[span_4](start_span)[span_4](end_span)
-const messageInput = document.getElementById("messageInput");[span_5](start_span)[span_5](end_span)
-const sendBtn = document.getElementById("sendBtn");[span_6](start_span)[span_6](end_span)
-const callTimer = document.getElementById("callTimer");[span_7](start_span)[span_7](end_span)
+// ---------------------------------------------------------------------------
+// ELEMENTS
+// ---------------------------------------------------------------------------
+const launcherBtn = document.getElementById("launcherBtn");
+const callWidget = document.getElementById("callWidget");
+const closeWidget = document.getElementById("closeWidget");
+const speakerToggle = document.getElementById("speakerToggle");
+const speakerIcon = document.getElementById("speakerIcon");
+const avatarRing = document.getElementById("avatarRing");
+const statusText = document.getElementById("statusText");
+const nameInput = document.getElementById("nameInput");
+const langSelect = document.getElementById("langSelect");
+const transcript = document.getElementById("transcript");
+const micBtn = document.getElementById("micBtn");
+const callBtn = document.getElementById("callBtn");
+const callBtnLabel = document.getElementById("callBtnLabel");
+const ttsAudio = document.getElementById("ttsAudio");
 
-// history: [{role: "agent" | "customer", text: "..."}]
-let history = [];[span_8](start_span)[span_8](end_span)
+// ---------------------------------------------------------------------------
+// STATE
+// ---------------------------------------------------------------------------
+let inCall = false;
+let isMuted = false;
+let isListening = false;
+let history = []; // [{role: "agent"|"customer", text}]
+let recognition = null;
 
-function addBubble(role, text) {[span_9](start_span)[span_9](end_span)
-  const bubble = document.createElement("div");[span_10](start_span)[span_10](end_span)
-  bubble.className = `bubble ${role}`;[span_11](start_span)[span_11](end_span)
-  bubble.textContent = text;[span_12](start_span)[span_12](end_span)
-  chatLog.appendChild(bubble);[span_13](start_span)[span_13](end_span)
-  chatLog.scrollTop = chatLog.scrollHeight;[span_14](start_span)[span_14](end_span)
-  return bubble;[span_15](start_span)[span_15](end_span)
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// ---------------------------------------------------------------------------
+// UI HELPERS
+// ---------------------------------------------------------------------------
+function setStatus(text) {
+  statusText.textContent = text;
 }
 
-function showTyping() {[span_16](start_span)[span_16](end_span)
-  const bubble = document.createElement("div");[span_17](start_span)[span_17](end_span)
-  bubble.className = "bubble agent typing";[span_18](start_span)[span_18](end_span)
-  bubble.innerHTML = "<span></span><span></span><span></span>";[span_19](start_span)[span_19](end_span)
-  chatLog.appendChild(bubble);[span_20](start_span)[span_20](end_span)
-  chatLog.scrollTop = chatLog.scrollHeight;[span_21](start_span)[span_21](end_span)
-  return bubble;[span_22](start_span)[span_22](end_span)
+function addTranscriptLine(role, text) {
+  const line = document.createElement("div");
+  line.className = `line ${role}`;
+  line.textContent = text;
+  transcript.appendChild(line);
+  transcript.scrollTop = transcript.scrollHeight;
 }
 
-async function sendToBackend(message) {[span_23](start_span)[span_23](end_span)
-  const response = await fetch(`${BACKEND_URL}/api/chat`, {[span_24](start_span)[span_24](end_span)
-    method: "POST",[span_25](start_span)[span_25](end_span)
-    headers: { "Content-Type": "application/json" },[span_26](start_span)[span_26](end_span)
-    body: JSON.stringify({ message, history }),[span_27](start_span)[span_27](end_span)
-  });
-
-  if (!response.ok) {[span_28](start_span)[span_28](end_span)
-    const errBody = await response.json().catch(() => ({}));[span_29](start_span)[span_29](end_span)
-    throw new Error(errBody.error || `সার্ভার এরর: ${response.status}`);[span_30](start_span)[span_30](end_span)
-  }
-
-  const data = await response.json();[span_31](start_span)[span_31](end_span)
-  return data.reply;[span_32](start_span)[span_32](end_span)
+function setAvatarState(state) {
+  avatarRing.classList.remove("listening", "speaking");
+  if (state) avatarRing.classList.add(state);
 }
 
-composerForm.addEventListener("submit", async (e) => {[span_33](start_span)[span_33](end_span)
-  e.preventDefault();[span_34](start_span)[span_34](end_span)
-  const text = messageInput.value.trim();[span_35](start_span)[span_35](end_span)
-  if (!text) return;[span_36](start_span)[span_36](end_span)
+function openWidget() {
+  callWidget.hidden = false;
+  launcherBtn.hidden = true;
+}
 
-  addBubble("customer", text);[span_37](start_span)[span_37](end_span)
-  history.push({ role: "customer", text });[span_38](start_span)[span_38](end_span)
-  messageInput.value = "";[span_39](start_span)[span_39](end_span)
-  messageInput.disabled = true;[span_40](start_span)[span_40](end_span)
-  sendBtn.disabled = true;[span_41](start_span)[span_41](end_span)
+function closeWidgetFn() {
+  endCall();
+  callWidget.hidden = true;
+  launcherBtn.hidden = false;
+}
 
-  const typingBubble = showTyping();[span_42](start_span)[span_42](end_span)
+// ---------------------------------------------------------------------------
+// TTS PLAYBACK
+// ---------------------------------------------------------------------------
+async function speak(text) {
+  setAvatarState("speaking");
+  setStatus("রিমি বলছে...");
 
   try {
-    const reply = await sendToBackend(text);[span_43](start_span)[span_43](end_span)
-    typingBubble.remove();[span_44](start_span)[span_44](end_span)
-    addBubble("agent", reply);[span_45](start_span)[span_45](end_span)
-    history.push({ role: "agent", text: reply });[span_46](start_span)[span_46](end_span)
+    const res = await fetch(`${BACKEND_URL}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, lang: langSelect.value }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || "TTS ব্যর্থ হয়েছে");
+
+    if (!isMuted) {
+      ttsAudio.src = `data:${data.mime};base64,${data.audio_base64}`;
+      await ttsAudio.play();
+      await new Promise((resolve) => {
+        ttsAudio.onended = resolve;
+      });
+    }
   } catch (err) {
-    typingBubble.remove();[span_47](start_span)[span_47](end_span)
-    addBubble("agent", `দুঃখিত, একটা সমস্যা হয়েছে: ${err.message}`);[span_48](start_span)[span_48](end_span)
+    console.error(err);
   } finally {
-    messageInput.disabled = false;[span_49](start_span)[span_49](end_span)
-    sendBtn.disabled = false;[span_50](start_span)[span_50](end_span)
-    messageInput.focus();[span_51](start_span)[span_51](end_span)
+    setAvatarState(null);
+    setStatus(inCall ? "মাইক চাপুন এবং কথা বলুন" : "কল শুরু করতে প্রস্তুত");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CHAT (Gemini backend)
+// ---------------------------------------------------------------------------
+async function sendToAgent(customerText) {
+  addTranscriptLine("customer", customerText);
+  history.push({ role: "customer", text: customerText });
+  setStatus("চিন্তা করছি...");
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: customerText, history }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "সার্ভার এরর");
+
+    addTranscriptLine("agent", data.reply);
+    history.push({ role: "agent", text: data.reply });
+    await speak(data.reply);
+  } catch (err) {
+    const msg = `দুঃখিত, একটা সমস্যা হয়েছে: ${err.message}`;
+    addTranscriptLine("agent", msg);
+    setStatus("আবার চেষ্টা করুন");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SPEECH RECOGNITION (mic input)
+// ---------------------------------------------------------------------------
+function setupRecognition() {
+  if (!SpeechRecognitionAPI) return null;
+
+  const rec = new SpeechRecognitionAPI();
+  rec.continuous = false;
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  rec.onstart = () => {
+    isListening = true;
+    micBtn.classList.add("active");
+    setAvatarState("listening");
+    setStatus("শুনছি...");
+  };
+
+  rec.onresult = (event) => {
+    const text = event.results[0][0].transcript.trim();
+    if (text) sendToAgent(text);
+  };
+
+  rec.onerror = (event) => {
+    if (event.error === "not-allowed" || event.error === "permission-denied") {
+      setStatus("মাইক্রোফোন পারমিশন দরকার।");
+    } else if (event.error !== "no-speech") {
+      setStatus("শুনতে সমস্যা হয়েছে, আবার চেষ্টা করুন।");
+    }
+  };
+
+  rec.onend = () => {
+    isListening = false;
+    micBtn.classList.remove("active");
+    if (avatarRing.classList.contains("listening")) setAvatarState(null);
+  };
+
+  return rec;
+}
+
+function toggleMic() {
+  if (!inCall) return;
+  if (!recognition) {
+    setStatus("এই ব্রাউজারে ভয়েস ইনপুট সাপোর্ট করে না। Chrome ব্যবহার করুন।");
+    return;
+  }
+  if (isListening) {
+    recognition.stop();
+  } else {
+    recognition.lang = RECOGNITION_LANG[langSelect.value] || "bn-BD";
+    try {
+      recognition.start();
+    } catch (err) {
+      // start() throws if already started; safe to ignore
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CALL LIFECYCLE
+// ---------------------------------------------------------------------------
+async function startCall() {
+  inCall = true;
+  history = [];
+  transcript.innerHTML = "";
+  callBtn.classList.add("in-call");
+  callBtnLabel.textContent = "End Call";
+  micBtn.disabled = false;
+  setStatus("সংযোগ হচ্ছে...");
+
+  let greetingText = FALLBACK_GREETING;
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/greeting`);
+    if (res.ok) {
+      const data = await res.json();
+      greetingText = data.text || greetingText;
+    }
+  } catch (err) {
+    // fall back to local greeting if backend is unreachable
+  }
+
+  addTranscriptLine("agent", greetingText);
+  history.push({ role: "agent", text: greetingText });
+  await speak(greetingText);
+}
+
+function endCall() {
+  if (recognition && isListening) recognition.stop();
+  ttsAudio.pause();
+  inCall = false;
+  callBtn.classList.remove("in-call");
+  callBtnLabel.textContent = "Start Call";
+  micBtn.disabled = true;
+  micBtn.classList.remove("active");
+  setAvatarState(null);
+  setStatus("কল শুরু করতে প্রস্তুত");
+}
+
+// ---------------------------------------------------------------------------
+// EVENT WIRING
+// ---------------------------------------------------------------------------
+launcherBtn.addEventListener("click", openWidget);
+closeWidget.addEventListener("click", closeWidgetFn);
+
+speakerToggle.addEventListener("click", () => {
+  isMuted = !isMuted;
+  speakerToggle.classList.toggle("muted", isMuted);
+  if (isMuted) ttsAudio.pause();
+});
+
+micBtn.addEventListener("click", toggleMic);
+
+callBtn.addEventListener("click", () => {
+  if (inCall) {
+    endCall();
+  } else {
+    startCall();
   }
 });
 
-// Simple call-duration timer, purely cosmetic
-let seconds = 0;[span_52](start_span)[span_52](end_span)
-setInterval(() => {
-  seconds += 1;[span_53](start_span)[span_53](end_span)
-  const m = String(Math.floor(seconds / 60)).padStart(2, "0");[span_54](start_span)[span_54](end_span)
-  const s = String(seconds % 60).padStart(2, "0");[span_55](start_span)[span_55](end_span)
-  callTimer.textContent = `${m}:${s}`;[span_56](start_span)[span_56](end_span)
-}, 1000);
-
-// Kick off the call with the agent's opening line
-window.addEventListener("DOMContentLoaded", () => {[span_57](start_span)[span_57](end_span)
-  addBubble("agent", GREETING);[span_58](start_span)[span_58](end_span)
-  history.push({ role: "agent", text: GREETING });[span_59](start_span)[span_59](end_span)
-});
+// init
+micBtn.disabled = true;
+recognition = setupRecognition();
+if (!SpeechRecognitionAPI) {
+  setStatus("এই ব্রাউজারে ভয়েস ইনপুট সাপোর্ট করে না। Chrome ব্যবহার করুন।");
+}
